@@ -205,15 +205,22 @@ class StandardResponse implements Response {
     /**
      * Signify the end of streaming response output.
      *
-     * User applications are NOT required to call Response::end() as the server
-     * will handle this automatically as needed.
+     * User applications are NOT required to call Response::end() after streaming
+     * or sending response data (though it's not incorrect to do so) -- the server
+     * will automatically call end() as needed.
      *
-     * Passing the optional $finalBody is equivalent to the following:
+     * Passing the optional $finalBodyChunk parameter is a shortcut equivalent to
+     * the following:
      *
-     *     $response->write($finalBody);
+     *     $response->write($finalBodyChunk);
      *     $response->end();
      *
-     * @param string $finalBody Optional final body data to send
+     * Note: Invoking Response::end() with a non-empty $finalBodyChunk parameter
+     * without having previously invoked Response::write() is equivalent to calling
+     * Response::send($finalBodyChunk).
+     *
+     * @param string $finalBodyChunk Optional final body data to send
+     * @return \Amp\Promise to be succeeded whenever local buffers aren't full
      */
     public function end(string $finalBody = ""): \Amp\Promise {
         if ($this->state & self::ENDED) {
@@ -245,6 +252,18 @@ class StandardResponse implements Response {
         $this->state = self::ENDED | self::STARTED;
 
         return $this->client->bufferDeferred ? $this->client->bufferDeferred->promise() : new \Amp\Success;
+    }
+
+    /**
+     * Signal an extraordinary response end.
+     *
+     * It succeeds an eventual pending request body message and will reset the
+     * active HTTP stream.
+     */
+    public function abort() {
+        $this->state = self::ENDED | self::STARTED;
+        $this->codec->valid(); // start the generator if not started yet
+        $this->codec = null;
     }
 
     private function setCookies() {
